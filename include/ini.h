@@ -63,7 +63,7 @@ typedef void (INI_HANDLER)(
 	IniField field
 );
 
-IniFile ini_init();
+IniFile ini_init(void);
 void ini_free(IniFile *ini);
 
 INI_STATUS ini_load(
@@ -74,6 +74,6 @@ INI_STATUS ini_load(
 
 void ini_append_raw(IniFile *ini, const char *str);
 void ini_append_field(/* .. */);
-void ini_write(IniFile *ini);
+INI_STATUS ini_write(IniFile *ini);
 
 #endif // INI_H

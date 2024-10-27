@@ -2,6 +2,10 @@
 #include "util.h"
 #include <ctype.h>
 
+CREATE_DA(size_t)
+
+#define max(x, y) ((x > y)? x : y)
+
 #define INI_COMMENT '#'
 #define INI_TOKEN(r, lr, c, p, l, t) \
 (IniToken){                      \
@@ -129,7 +133,7 @@ static inline void ini_token_format_name(INI_LEXER_TOKEN token, char *buf) {
 	strcat(buf, "`");
 }
 
-IniFile ini_init() {
+IniFile ini_init(void) {
 	return (IniFile){ 0 };
 }
 
@@ -190,7 +194,7 @@ static inline bool ini_lexer_prev(IniLexer *lexer, char *c) {
 }
 
 static inline bool ini_lexer_skip_entire_line(IniLexer *lexer) {
-	char c;
+	char c = 0;
 	while (ini_lexer_next(lexer, &c) && c != '\n') {}
 	ini_lexer_prev(lexer, NULL);
 	ini_lexer_prev(lexer, NULL);
@@ -376,13 +380,14 @@ static inline IniToken ini_lexer_next_token(IniLexer *lexer) {
 	return INI_TOKEN(sr, sr, sc, sp, 0, INVALID);
 }
 
-static inline bool ini_read_entire_file(const char *filepath, size_t *len, char **data) {
+static inline INI_STATUS ini_read_entire_file(const char *filepath, size_t *len, char **data) {
 	INI_STATUS status = INI_STATUS_OK;
-	FILE *f;
 	*data = 0;
 
+	FILE *f;
+
 	{
-		f = fopen(filepath, "r");
+		f = fopen(filepath, "rb");
 
 		if (f == NULL) {
 			RETURN_DEFER(INI_STATUS_FOPEN);
@@ -482,17 +487,17 @@ static inline char *ini_parser_copy_string(IniToken token) {
 	}
 
 	char *res = (char*)malloc(
-		(
+		sizeof(u32) +    // Fat pointer size
+		((
 			token.len - to_remove +
-			sizeof(char) + // Null terminator
-			sizeof(u32)    // Fat pointer size
-		) * sizeof(char)
+			1 // Null terminator
+		) * sizeof(char))
 	);
 
 	size_t respos = 0;
 
 	*((u32*)res) = token.len - to_remove + 1;
-	res += sizeof(u32);
+	res = (char*)((u32*) res + 1);
 
 	for (size_t i = 0; i < token.len; i++) {
 		if (token.data[i] == '\\') {
@@ -556,26 +561,12 @@ static inline bool ini_parse(IniFile *ini, IniLexer *lexer, INI_HANDLER *handler
 	IniToken value_token;
 	bool present;
 
-	// do {
-	// 	present = ini_parser_expect_tokens(
-	// 		lexer,
-	// 		INI_LEXER_LITERAL | INI_LEXER_EOF,
-	// 		&token
-	// 	);
-	//
-	// 	printf("%zu:%zu token: %d, %.*s\n", token.row + 1, token.col + 1, token.type, (int)token.len, token.data);
-	// } while (token.type != INI_LEXER_EOF);
-	//
-	// return true;
-
 	while (true) {
 		present = ini_parser_expect_tokens(
 			lexer,
 			INI_LEXER_LITERAL | INI_LEXER_EOF | INI_LEXER_NEWLINE,
 			&name_token
 		);
-
-		// printf("%zu:%zu token: %d, %.*s\n", token.row + 1, token.col + 1, token.type, (int)token.len, token.data);
 
 		if (!present) {
 			ini_parser_expect_error(INI_LEXER_LITERAL | INI_LEXER_EOF | INI_LEXER_NEWLINE, &name_token);
@@ -726,6 +717,7 @@ static inline bool ini_parse(IniFile *ini, IniLexer *lexer, INI_HANDLER *handler
 				}
 			}
 
+			field._lline = value_token.last_row;
 			break;
 		}
 
@@ -754,7 +746,7 @@ void ini_free(IniFile *ini) {
 	for (size_t i = 0; i < ini->values.count; i++) {
 		switch (ini->values.items[i].type) {
 		case INI_TYPE_STRING:
-			free(ini->values.items[i].as.str - 4);
+			free((u32*)ini->values.items[i].as.str - 1);
 			break;
 
 		case INI_TYPE_STRING_ARR:
@@ -809,10 +801,199 @@ INI_STATUS ini_load(
 //
 // }
 
-// void ini_append_field() {
+// void ini_append_field(/* .. */) {
 // 
 // }
 
-// void ini_write(IniFile *ini) {
-//
-// }
+// --------------------------------------------------
+// Writing related functions
+
+static inline void ini_write_find_newlines(size_t_da *arr, char *data, size_t datalen) {
+	char *start = data;
+	char *curr = data;
+
+	while ((data = (char*)memchr(data, '\n', datalen))) {
+		datalen -= (data - curr) + 1;
+		size_t_da_append(arr, data - start);
+		data++;
+		curr = data;
+	}
+}
+
+static inline void ini_write_copy(size_t fline, size_t lline, size_t_da newlines, char *data, FILE *f) {
+	assert(fline <= lline);
+	size_t start;
+
+	if (fline == 0) {
+		start = 0;
+	} else {
+		start = newlines.items[fline - 1] + 1;
+	}
+
+	fprintf(f, "%.*s", (int)(newlines.items[lline] - start) + 1, &data[start]);
+}
+
+static inline size_t ini_write_string(IniAs t, FILE *f) {
+	size_t res = 1;
+	fputc('"', f);
+
+	for (u32 i = 0; i < *(((u32*)t.str) - 1); i++) {
+		if (t.str[i] == '\n') {
+			res++;
+		} else if (t.str[i] == '"') {
+			fputc('\\', f);
+		}
+
+		fputc(t.str[i], f);
+	}
+
+	fputc('"', f);
+	return res;
+}
+
+static inline size_t ini_write_number(IniAs t, FILE *f) {
+	fprintf(f, "%ld", t.num);
+	return 1;
+}
+
+static inline size_t ini_write_decimal(IniAs t, FILE *f) {
+	fprintf(f, "%.1lf", t.dec);
+	return 1;
+}
+
+static inline size_t ini_write_boolean(IniAs t, FILE *f) {
+	if (t.boolean) {
+		fputs("true", f);
+	} else {
+		fputs("false", f);
+	}
+
+	return 1;
+}
+
+static inline size_t ini_write_array(IniAs_da arr, FILE *f, size_t (*writer)(IniAs, FILE*)) {
+	size_t res = 1;
+
+	fputc('[', f);
+
+	for (size_t i = 0; i < arr.count; i++) {
+		res += writer(arr.items[i], f) - 1;
+
+		if (i != arr.count - 1) {
+			fputc(',', f);
+		}
+	}
+
+	fputc(']', f);
+	return res;
+}
+
+static inline void ini_write_field(IniField *field, FILE *f) {
+	static_assert(INI_TYPE_AMOUNT == 8, "Incorrect type amount");
+
+	fprintf(f, "%.*s=", (int)field->fieldname_size, field->fieldname);
+
+	switch (field->type) {
+	case INI_TYPE_STRING:
+		ini_write_string(field->as, f);
+		break;
+	case INI_TYPE_NUMBER:
+		ini_write_number(field->as, f);
+		break;
+	case INI_TYPE_DECIMAL:
+		ini_write_decimal(field->as, f);
+		break;
+	case INI_TYPE_BOOLEAN:
+		ini_write_boolean(field->as, f);
+		break;
+	case INI_TYPE_STRING_ARR:
+		ini_write_array(field->arr, f, ini_write_string);
+		break;
+	case INI_TYPE_NUMBER_ARR:
+		ini_write_array(field->arr, f, ini_write_number);
+		break;
+	case INI_TYPE_DECIMAL_ARR:
+		ini_write_array(field->arr, f, ini_write_decimal);
+		break;
+	case INI_TYPE_BOOLEAN_ARR:
+		ini_write_array(field->arr, f, ini_write_boolean);
+		break;
+	default:
+		assert(0 && "Unreachable");
+	}
+
+	fputc('\n', f);
+}
+
+INI_STATUS ini_write(IniFile *ini) {
+	INI_STATUS status = INI_STATUS_OK;
+	size_t len;
+	char *data = NULL;
+	FILE *f = NULL;
+	size_t_da newlines = { 0 };
+
+	{
+		INI_STATUS ret;
+
+		if ((
+			ret = ini_read_entire_file(
+				ini->filepath,
+				&len, &data
+			)
+		) != INI_STATUS_OK) {
+			RETURN_DEFER(ret);
+		}
+
+		f = fopen(ini->filepath, "wb");
+
+		if (f == NULL) {
+			RETURN_DEFER(INI_STATUS_FOPEN);
+		}
+	}
+
+	size_t_da_init(&newlines, 2);
+	ini_write_find_newlines(&newlines, data, len);
+
+	size_t last_line = 0;
+
+	for (size_t i = 0; i < ini->values.count; i++) {
+		IniField *field = &ini->values.items[i];
+
+		if (!field->dirty) {
+			continue;
+		}
+
+		field->dirty = false;
+
+		if (field->_fline != last_line) {
+			ini_write_copy(last_line, field->_fline - 1, newlines, data, f);
+		}
+		
+		ini_write_field(field, f);
+		last_line = field->_lline + 1;
+	}
+
+	ini_write_copy(last_line, newlines.count - 1, newlines, data, f);
+
+defer:
+	if (f != NULL) {
+		fclose(f);
+	}
+
+	if (data != NULL) {
+		free(data);
+	}
+
+	if (newlines.items != 0) {
+		size_t_da_free(&newlines);
+	}
+
+	return status;
+}
+
+// BUG: Writing a string with a \ in it causes the slash to be printed as a single \, without escaping it.
+// BUG: An unclosed string causes the program to go into an infinite loop
+// TODO: Switch away from fat pointers, use NULL-terminated everywhere
+// or a struct with the size next to the NULL-terminated pointer
+// TODO: Create some utility functions to make it easier to free up values and change them
+// TODO: Add the ability to append a field

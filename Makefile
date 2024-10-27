@@ -1,7 +1,7 @@
 CC := cc
 INC_DIR := ./include/
-CFLAGS := -ggdb -fsanitize=address -Wall -Wextra -pedantic -I$(INC_DIR)
-# CFLAGS := -O3 -Wall -Wextra -pedantic -I$(INC_DIR)
+# CFLAGS := -ggdb -fsanitize=address -Wall -Wextra -pedantic -I$(INC_DIR)
+CFLAGS := -O3 -Wall -Wextra -pedantic -I$(INC_DIR)
 EXECUTABLE := ini
 
 # These paths should always be in the form ./<path>/
