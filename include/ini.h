@@ -3,6 +3,9 @@
 
 #include "util.h"
 
+#define INI_STRING_IMPLEMENTATION
+#include "ini_string.h"
+
 typedef enum {
 	INI_STATUS_OK = 0,
 
@@ -29,7 +32,7 @@ typedef enum {
 } INI_TYPE;
 
 typedef union {
-	char *str;
+	IniString *str;
 	s64 num;
 	double dec;
 	bool boolean;
@@ -38,16 +41,15 @@ typedef union {
 CREATE_DA(IniAs)
 
 typedef struct {
-	char *fieldname;
-	size_t fieldname_size;
+	IniString *fieldname;
 
 	union {
 		IniAs as;
 		IniAs_da arr;
 	};
 
-	size_t _fline;
-	size_t _lline;
+	size_t startl;
+	size_t endl;
 	u8 type; // enum INI_TYPE
 	bool dirty;
 } IniField;
@@ -60,7 +62,7 @@ typedef struct {
 } IniFile;
 
 typedef void (INI_HANDLER)(
-	IniField field
+	IniField *field
 );
 
 IniFile ini_init(void);
@@ -73,7 +75,7 @@ INI_STATUS ini_load(
 );
 
 void ini_append_raw(IniFile *ini, const char *str);
-void ini_append_field(/* .. */);
+void ini_append_field(IniFile *ini, IniField *field);
 INI_STATUS ini_write(IniFile *ini);
 
 #endif // INI_H

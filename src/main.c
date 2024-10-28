@@ -8,23 +8,23 @@ static inline void print_usage(const char *filename) {
 }
 
 static inline void handler(
-	IniField field
+	IniField *field
 ) {
-	printf("(%zu, %zu) %.*s: ", field._fline, field._lline, (int)field.fieldname_size, field.fieldname);
+	printf("(%zu, %zu) %s: ", field->startl, field->endl, field->fieldname->value);
 
-	switch (field.type) {
+	switch (field->type) {
 	case INI_TYPE_STRING:
-		printf("string(%.*s)\n", *((int*)field.as.str - 1), field.as.str);
+		printf("string(%s)\n", field->as.str->value);
 		break;
 	case INI_TYPE_NUMBER:
-		printf("number(%ld)\n", field.as.num);
+		printf("number(%ld)\n", field->as.num);
 		break;
 	case INI_TYPE_DECIMAL:
-		printf("decimal(%lf)\n", field.as.dec);
+		printf("decimal(%lf)\n", field->as.dec);
 		break;
 	case INI_TYPE_BOOLEAN:
 		printf("boolean(");
-		if (field.as.boolean) {
+		if (field->as.boolean) {
 			printf("true");
 		} else {
 			printf("false");
@@ -33,10 +33,10 @@ static inline void handler(
 		break;
 	case INI_TYPE_STRING_ARR:
 		printf("stringarr(");
-		for (size_t i = 0; i < field.arr.count; i++) {
-			printf("%.*s", *((int*)(field.arr.items[i].str) - 1), field.arr.items[i].str);
+		for (size_t i = 0; i < field->arr.count; i++) {
+			printf("%s", field->arr.items[i].str->value);
 
-			if (i != field.arr.count - 1) { 
+			if (i != field->arr.count - 1) { 
 				printf(", ");
 			}
 		}
@@ -45,10 +45,10 @@ static inline void handler(
 		break;
 	case INI_TYPE_NUMBER_ARR:
 		printf("numberarr(");
-		for (size_t i = 0; i < field.arr.count; i++) {
-			printf("%ld",  field.arr.items[i].num);
+		for (size_t i = 0; i < field->arr.count; i++) {
+			printf("%ld",  field->arr.items[i].num);
 
-			if (i != field.arr.count - 1) { 
+			if (i != field->arr.count - 1) { 
 				printf(", ");
 			}
 		}
@@ -57,10 +57,10 @@ static inline void handler(
 		break;
 	case INI_TYPE_DECIMAL_ARR:
 		printf("decimalarr(");
-		for (size_t i = 0; i < field.arr.count; i++) {
-			printf("%lf",  field.arr.items[i].dec);
+		for (size_t i = 0; i < field->arr.count; i++) {
+			printf("%lf",  field->arr.items[i].dec);
 
-			if (i != field.arr.count - 1) { 
+			if (i != field->arr.count - 1) { 
 				printf(", ");
 			}
 		}
@@ -69,14 +69,14 @@ static inline void handler(
 		break;
 	case INI_TYPE_BOOLEAN_ARR:
 		printf("booleanarr(");
-		for (size_t i = 0; i < field.arr.count; i++) {
-			if (field.arr.items[i].boolean) {
+		for (size_t i = 0; i < field->arr.count; i++) {
+			if (field->arr.items[i].boolean) {
 				printf("true");
 			} else {
 				printf("false");
 			}
 
-			if (i != field.arr.count - 1) { 
+			if (i != field->arr.count - 1) { 
 				printf(", ");
 			}
 		}
@@ -105,28 +105,25 @@ int main(int argc, const char **argv) {
 	}
 
 	// TEST: Decimal --> String
-	ini.values.items[0].as.str = (char*)malloc(sizeof("Custom string") + sizeof(u32));
-	*((u32*)ini.values.items[0].as.str) = strlen("Custom string");
-	ini.values.items[0].as.str = (char*)((u32*)ini.values.items[0].as.str + 1);
+	ini.values.items[0].as.str = ini_string_new("Custom string");
 	ini.values.items[0].type = INI_TYPE_STRING;
-	memcpy(ini.values.items[0].as.str, "Custom string", sizeof("Custom string"));
 	ini.values.items[0].dirty = true;
 
 	// TEST: String --> Number
-	free((u32*)ini.values.items[1].as.str - 1);
+	ini_string_free(ini.values.items[1].as.str);
 	ini.values.items[1].as.num = 420;
 	ini.values.items[1].type = INI_TYPE_NUMBER;
 	ini.values.items[1].dirty = true;
 
 	// TEST: String --> Decimal
-	free((u32*)ini.values.items[2].as.str - 1);
+	ini_string_free(ini.values.items[2].as.str);
 	ini.values.items[2].as.dec = -420.69;
 	ini.values.items[2].type = INI_TYPE_DECIMAL;
 	ini.values.items[2].dirty = true;
 
 	// TEST: String array --> Boolean
 	for (size_t i = 0; i < ini.values.items[3].arr.count; i++) {
-		free((u32*)ini.values.items[3].arr.items[i].str - 1);
+		ini_string_free(ini.values.items[3].arr.items[i].str);
 	}
 
 	IniAs_da_free(&ini.values.items[3].arr);
@@ -138,22 +135,13 @@ int main(int argc, const char **argv) {
 	IniAs_da_init(&ini.values.items[4].arr, 3);
 
 	IniAs as;
-	as.str = malloc(sizeof("String 1") + sizeof(u32));
-	*((u32*)as.str) = sizeof("String 1");
-	as.str = (char*)((u32*)as.str + 1);
-	memcpy(as.str, "String 1", sizeof("String 1"));
+	as.str = ini_string_new("String 1");
 	IniAs_da_append(&ini.values.items[4].arr, as);
 
-	as.str = malloc(sizeof("String 1") + sizeof(u32));
-	*((u32*)as.str) = sizeof("String 1");
-	as.str = (char*)((u32*)as.str + 1);
-	memcpy(as.str, "String 2", sizeof("String 1"));
+	as.str = ini_string_new("String 2");
 	IniAs_da_append(&ini.values.items[4].arr, as);
 
-	as.str = malloc(sizeof("String 1") + sizeof(u32));
-	*((u32*)as.str) = sizeof("String 1");
-	as.str = (char*)((u32*)as.str + 1);
-	memcpy(as.str, "String 3", sizeof("String 1"));
+	as.str = ini_string_new("String 3");
 	IniAs_da_append(&ini.values.items[4].arr, as);
 
 	ini.values.items[4].type = INI_TYPE_STRING_ARR;
@@ -173,7 +161,7 @@ int main(int argc, const char **argv) {
 	ini.values.items[5].dirty = true;
 
 	// TEST: String --> Decimal array
-	free((u32*)ini.values.items[6].as.str - 1);
+	ini_string_free(ini.values.items[6].as.str);
 
 	IniAs_da_init(&ini.values.items[6].arr, 3);
 
@@ -188,7 +176,7 @@ int main(int argc, const char **argv) {
 	ini.values.items[6].dirty = true;
 
 	// TEST: String --> Number array
-	free((u32*)ini.values.items[7].as.str - 1);
+	ini_string_free(ini.values.items[7].as.str);
 
 	IniAs_da_init(&ini.values.items[7].arr, 3);
 

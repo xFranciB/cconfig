@@ -1,4 +1,5 @@
 #include "ini.h"
+#include "ini_string.h"
 #include "util.h"
 #include <ctype.h>
 
@@ -476,7 +477,7 @@ static inline void ini_parser_expect_error(u16 expected, IniToken *got) {
 }
 
 // TODO: Support special characters like \n
-static inline char *ini_parser_copy_string(IniToken token) {
+static inline IniString *ini_parser_copy_string(IniToken token) {
 	size_t to_remove = 0;
 
 	for (size_t i = 0; i < token.len; i++) {
@@ -486,27 +487,18 @@ static inline char *ini_parser_copy_string(IniToken token) {
 		}
 	}
 
-	char *res = (char*)malloc(
-		sizeof(u32) +    // Fat pointer size
-		((
-			token.len - to_remove +
-			1 // Null terminator
-		) * sizeof(char))
-	);
-
+	IniString *res = ini_string_from_size(token.len - to_remove);
 	size_t respos = 0;
-
-	*((u32*)res) = token.len - to_remove + 1;
-	res = (char*)((u32*) res + 1);
 
 	for (size_t i = 0; i < token.len; i++) {
 		if (token.data[i] == '\\') {
 			continue;
 		}
 
-		res[respos++] = token.data[i];
+		res->value[respos++] = token.data[i];
 	}
 
+	res->value[respos] = 0;
 	return res;
 }
 
@@ -609,13 +601,14 @@ static inline bool ini_parse(IniFile *ini, IniLexer *lexer, INI_HANDLER *handler
 		}
 
 		IniField field = {
-			.fieldname = name_token.data,
-			.fieldname_size = name_token.len,
-			
-			._fline = name_token.row,
-			._lline = value_token.last_row,
+			.startl = name_token.row,
+			.endl = value_token.last_row,
 			.dirty = false
 		};
+
+		field.fieldname = ini_string_from_sized_string(
+			name_token.data, name_token.len
+		);
 
 		switch (value_token.type) {
 		case INI_LEXER_STRING:
@@ -717,11 +710,11 @@ static inline bool ini_parse(IniFile *ini, IniLexer *lexer, INI_HANDLER *handler
 				}
 			}
 
-			field._lline = value_token.last_row;
+			field.endl = value_token.last_row;
 			break;
 		}
 
-		handler(field);
+		handler(&field);
 		IniField_da_append(&ini->values, field);
 
 		present = ini_parser_expect_tokens(
@@ -746,12 +739,12 @@ void ini_free(IniFile *ini) {
 	for (size_t i = 0; i < ini->values.count; i++) {
 		switch (ini->values.items[i].type) {
 		case INI_TYPE_STRING:
-			free((u32*)ini->values.items[i].as.str - 1);
+			ini_string_free(ini->values.items[i].as.str);
 			break;
 
 		case INI_TYPE_STRING_ARR:
 			for (size_t j = 0; j < ini->values.items[i].arr.count; j++) {
-				free(ini->values.items[i].arr.items[j].str - 4);
+				ini_string_free(ini->values.items[i].arr.items[j].str);
 			}
 
 			// Fall through
@@ -761,6 +754,8 @@ void ini_free(IniFile *ini) {
 			IniAs_da_free(&ini->values.items[i].arr);
 			break;
 		}
+
+		ini_string_free(ini->values.items[i].fieldname);
 	}
 
 	IniField_da_free(&ini->values);
@@ -801,8 +796,11 @@ INI_STATUS ini_load(
 //
 // }
 
-// void ini_append_field(/* .. */) {
-// 
+// void ini_append_field(IniFile *ini, IniField *field) {
+	// field->dirty = true;
+	// field->_fline = ini->values.items[ini->values.count - 1]._lline + 1;
+	// field->_lline = 
+	// IniField_da_append(&ini->values, *field);
 // }
 
 // --------------------------------------------------
@@ -837,14 +835,16 @@ static inline size_t ini_write_string(IniAs t, FILE *f) {
 	size_t res = 1;
 	fputc('"', f);
 
-	for (u32 i = 0; i < *(((u32*)t.str) - 1); i++) {
-		if (t.str[i] == '\n') {
+	for (u32 i = 0; i < t.str->size; i++) {
+		if (t.str->value[i] == '\n') {
 			res++;
-		} else if (t.str[i] == '"') {
+		} else if (t.str->value[i] == '"') {
+			fputc('\\', f);
+		} else if (t.str->value[i] == '\\') {
 			fputc('\\', f);
 		}
 
-		fputc(t.str[i], f);
+		fputc(t.str->value[i], f);
 	}
 
 	fputc('"', f);
@@ -891,7 +891,7 @@ static inline size_t ini_write_array(IniAs_da arr, FILE *f, size_t (*writer)(Ini
 static inline void ini_write_field(IniField *field, FILE *f) {
 	static_assert(INI_TYPE_AMOUNT == 8, "Incorrect type amount");
 
-	fprintf(f, "%.*s=", (int)field->fieldname_size, field->fieldname);
+	fprintf(f, "%s=", field->fieldname->value);
 
 	switch (field->type) {
 	case INI_TYPE_STRING:
@@ -965,12 +965,12 @@ INI_STATUS ini_write(IniFile *ini) {
 
 		field->dirty = false;
 
-		if (field->_fline != last_line) {
-			ini_write_copy(last_line, field->_fline - 1, newlines, data, f);
+		if (field->startl != last_line) {
+			ini_write_copy(last_line, field->startl - 1, newlines, data, f);
 		}
 		
 		ini_write_field(field, f);
-		last_line = field->_lline + 1;
+		last_line = field->endl + 1;
 	}
 
 	ini_write_copy(last_line, newlines.count - 1, newlines, data, f);
@@ -991,9 +991,8 @@ defer:
 	return status;
 }
 
-// BUG: Writing a string with a \ in it causes the slash to be printed as a single \, without escaping it.
 // BUG: An unclosed string causes the program to go into an infinite loop
-// TODO: Switch away from fat pointers, use NULL-terminated everywhere
-// or a struct with the size next to the NULL-terminated pointer
+// BUG: `startl` and `endl` are not being update in the `ini_write` function
+// which might cause them to not be correct the second time it is called
 // TODO: Create some utility functions to make it easier to free up values and change them
 // TODO: Add the ability to append a field
