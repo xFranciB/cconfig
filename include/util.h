@@ -12,6 +12,7 @@
 #define PACKED __attribute__((packed, aligned(1)))
 #define UNUSED(x) ((void)x)
 #define MEMBER_SIZE(s, m) (sizeof(((s*)0)->m))
+#define RETURN_DEFER(s) do { status = (s); goto defer; } while(0);
 
 #ifdef __GNUC__
     #define _bswap16(x) __builtin_bswap16(x)
@@ -27,41 +28,45 @@
 #define  BS24(x) x = _bswap24(x)
 #define  BS32(x) x = _bswap32(x)
 
-#define CREATE_DA(T) \
-typedef struct {                                                         \
-	T *items;                                                            \
-	size_t count;                                                        \
-	size_t capacity;                                                     \
-} T##_da;                                                                \
-static inline void T##_da_init(T##_da *arr, long long initial_size) {    \
-	assert(initial_size > 0);                                            \
-	arr->capacity = initial_size;                                        \
-	arr->count = 0;                                                      \
-	arr->items = (T*)malloc(arr->capacity * sizeof(T));                  \
-}                                                                        \
-static inline void T##_da_append(T##_da *arr, T value) {                 \
-	if (arr->capacity == arr->count) {                                   \
-		arr->capacity *= 2;                                              \
-		arr->items = (T*)realloc(arr->items, arr->capacity * sizeof(T)); \
-	}                                                                    \
-	arr->items[arr->count++] = value;                                    \
-}                                                                        \
-static inline void T##_da_free(T##_da *arr) {                            \
-	free(arr->items);                                                    \
-	arr->items = 0;                                                      \
-	arr->count = 0;                                                      \
-	arr->capacity = 0;                                                   \
+#define CREATE_DA(T, Name) \
+typedef struct {                                                            \
+	T *items;                                                               \
+	size_t count;                                                           \
+	size_t capacity;                                                        \
+} Name##_da;                                                                \
+static inline void Name##_da_init(Name##_da *arr, long long initial_size) { \
+	assert(initial_size > 0);                                               \
+	arr->capacity = initial_size;                                           \
+	arr->count = 0;                                                         \
+	arr->items = (T*)malloc(arr->capacity * sizeof(T));                     \
+}                                                                           \
+static inline void Name##_da_append(Name##_da *arr, T value) {              \
+	if (arr->capacity == arr->count) {                                      \
+		arr->capacity *= 2;                                                 \
+		arr->items = (T*)realloc(arr->items, arr->capacity * sizeof(T));    \
+	}                                                                       \
+	arr->items[arr->count++] = value;                                       \
+}                                                                           \
+static inline void Name##_da_free(Name##_da *arr) {                         \
+	free(arr->items);                                                       \
+	arr->items = 0;                                                         \
+	arr->count = 0;                                                         \
+	arr->capacity = 0;                                                      \
 }
 
-#define ERROR_EXIT(...) do {           \
+#define ERROR_EXIT() do {           \
+	exit(EXIT_FAILURE);             \
+} while (0)
+
+#define ERROR_EXIT_MSG(...) do {       \
 	fprintf(stderr, __VA_ARGS__);      \
 	exit(EXIT_FAILURE);                \
 } while (0)
 
-#define ERROR_EXIT_ERRNO(...) do {            \
-	fprintf(stderr, __VA_ARGS__);             \
+#define ERROR_EXIT_ERRNO(...) do {              \
+	fprintf(stderr, __VA_ARGS__);               \
 	fprintf(stderr, ": %s\n", strerror(errno)); \
-	exit(EXIT_FAILURE);                       \
+	exit(EXIT_FAILURE);                         \
 } while (0)
 
 typedef uint8_t  u8;

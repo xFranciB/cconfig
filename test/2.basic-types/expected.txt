@@ -1,0 +1,21 @@
+exit 0
+stdout 0
+stderr 0
+ini 122
+# comment line 1
+# comment line 2
+
+number = 10
+dec = -32.5
+
+
+
+
+str = "test string \"\" ''"
+bool = true
+
+
+
+
+
+# empty lines

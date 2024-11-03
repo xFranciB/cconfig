@@ -1,0 +1,7 @@
+exit 0
+stdout 0
+stderr 0
+ini 13
+str='  
+
+\''

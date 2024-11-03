@@ -19,26 +19,28 @@
 // NOTE: All sizes, both the ones in the `IniString` struct
 // and the ones passed to the functions, do not include the NULL terminator
 
-typedef struct  {
-	u32 size; // Without null terminator
-	char value[];
-} IniString;
+typedef char IniString;
+typedef u32 IniStringSize;
+
+#define INI_STRING_SIZE(s) (*(((IniStringSize*)s) - 1))
 
 INISTRINGDEF IniString *ini_string_from_size(size_t len);
 INISTRINGDEF IniString *ini_string_new(const char *s);
 INISTRINGDEF IniString *ini_string_from_sized_string(const char *s, size_t len);
 INISTRINGDEF void ini_string_free(IniString *s);
 
+// TEST: Remove
+#define INI_STRING_IMPLEMENTATION
 #ifdef INI_STRING_IMPLEMENTATION
 
 INISTRINGDEF IniString *ini_string_from_size(size_t len) {
 	IniString *res = (IniString*)malloc(
-		MEMBER_SIZE(IniString, size) +
+		(sizeof(IniStringSize)) +
 		len + 1
 	);
 
-	res->size = len;
-	return res;
+	*((IniStringSize*)res) = len;
+	return (IniString*)(((IniStringSize*)res) + 1);
 }
 
 INISTRINGDEF IniString *ini_string_new(const char *s) {
@@ -46,22 +48,24 @@ INISTRINGDEF IniString *ini_string_new(const char *s) {
 
 	IniString *res = ini_string_from_size(len);
 
-	res->size = len;
-	memcpy(&res->value, s, len + 1);
-		
+	size_t i = 0;
+
+	do {
+		res[i++] = *s;
+	} while (*(s++) != 0);
+
 	return res;
 }
 
 INISTRINGDEF IniString *ini_string_from_sized_string(const char *s, size_t len) {
 	IniString *res = ini_string_from_size(len);
-	memcpy(&res->value, s, len);
-	res->value[res->size] = 0;
-
+	memcpy(res, s, len);
+	res[INI_STRING_SIZE(res)] = 0;
 	return res;
 }
 
 INISTRINGDEF void ini_string_free(IniString *s) {
-	free(s);
+	free(((IniStringSize*)s) - 1);
 }
 
 #endif // INI_STRING_IMPLEMENTATION

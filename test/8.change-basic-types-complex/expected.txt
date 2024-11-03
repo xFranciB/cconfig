@@ -1,0 +1,32 @@
+exit 0
+stdout 0
+stderr 0
+ini 216
+# comment number 1
+
+
+
+# another comment
+
+
+number=120033
+
+decim=70.5
+str="still
+yet
+another
+	multine
+string	to
+test
+ with \"weird\" 'stuff' [ in it]\\"
+
+				# indented comment
+
+bool=true
+
+
+
+							 # whitespace...
+
+
+

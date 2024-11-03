@@ -3,7 +3,7 @@
 #include "util.h"
 #include <ctype.h>
 
-CREATE_DA(size_t)
+CREATE_DA(size_t, size_t)
 
 #define max(x, y) ((x > y)? x : y)
 
@@ -17,8 +17,6 @@ CREATE_DA(size_t)
 	.type = INI_LEXER_##t,       \
 	.data = &lexer->data[p]      \
 }
-
-#define RETURN_DEFER(s) do { status = (s); goto defer; } while(0);
 
 typedef enum { // u16
 	INI_LEXER_STRING       = 1 << 0,
@@ -237,8 +235,15 @@ static inline IniToken ini_lexer_read_literal(IniLexer *lexer) {
 	ini_lexer_next(lexer, &current);
 
 	while (isalnum(current)) {
-		ini_lexer_next(lexer, &current);
+		if (ini_lexer_next(lexer, &current) == false) {
+			break;
+		}
+
 		len++;
+	}
+
+	if (len == 0) {
+		return INI_TOKEN(sr, sr, sc, sp, 0, EOF);
 	}
 
 	ini_lexer_prev(lexer, NULL);
@@ -308,15 +313,20 @@ static inline IniToken ini_lexer_read_string(IniLexer *lexer, char d) {
 	int len = 0;
 
 	while (current != d) {
-		ini_lexer_next(lexer, &current);
+		if (ini_lexer_next(lexer, &current) == false) {
+			return INI_TOKEN(sr, lexer->row, sc, sp, len, EOF);
+		}
+
 		len++;
 
 		if (current == '\\') {
 			// TODO: Special characters like \n
 			
-			ini_lexer_next(lexer, NULL);
-			ini_lexer_next(lexer, &current);
-			len += 2;
+			if (ini_lexer_next(lexer, NULL) == false) {
+				return INI_TOKEN(sr, lexer->row, sc, sp, len, EOF);
+			}
+
+			len++;
 		}
 	}
 
@@ -441,6 +451,10 @@ static inline bool ini_parser_expect_tokens(IniLexer *lexer, u16 tokens, IniToke
 	return (tokens & token->type) != 0;
 }
 
+// TODO: Make all parser errors return the execution to the user
+// so that they can decide to call this function if they want a
+// formatted error message. This should also not call exit() and
+// the user should be able to free up all resources in case of a failure.
 static inline void ini_parser_expect_error(u16 expected, IniToken *got) {
 	assert(expected != 0 && "Incorrect expected tokens value");
 
@@ -473,7 +487,8 @@ static inline void ini_parser_expect_error(u16 expected, IniToken *got) {
 	strcat(buf, " but got ");
 	ini_token_format_name(got->type, buf);
 
-	ERROR_EXIT("%s\n", buf);
+	// TODO: Remove exit() calls from the library
+	ERROR_EXIT_MSG("%s\n", buf);
 }
 
 // TODO: Support special characters like \n
@@ -495,10 +510,10 @@ static inline IniString *ini_parser_copy_string(IniToken token) {
 			continue;
 		}
 
-		res->value[respos++] = token.data[i];
+		res[respos++] = token.data[i];
 	}
 
-	res->value[respos] = 0;
+	res[respos] = 0;
 	return res;
 }
 
@@ -548,7 +563,12 @@ static inline void ini_parser_get_primitive(IniToken token, IniAs *out) {
 	}
 }
 
-static inline bool ini_parse(IniFile *ini, IniLexer *lexer, INI_HANDLER *handler) {
+static inline bool ini_parse(
+	IniFile *ini,
+	IniLexer *lexer,
+	INI_HANDLER *handler,
+	void *user
+) {
 	IniToken name_token;
 	IniToken value_token;
 	bool present;
@@ -571,42 +591,60 @@ static inline bool ini_parse(IniFile *ini, IniLexer *lexer, INI_HANDLER *handler
 			break;
 		}
 
-		present = ini_parser_expect_tokens(
-			lexer,
-			INI_LEXER_EQUALS,
-			&value_token
-		);
-
-		if (!present) {
-			ini_parser_expect_error(INI_LEXER_EQUALS, &value_token);
-			return false;
-		}
-
-		present = ini_parser_expect_tokens(
-			lexer,
-			INI_LEXER_STRING | INI_LEXER_NUMBER |
-			INI_LEXER_DECIMAL | INI_LEXER_BOOLEAN |
-			INI_LEXER_OSQUARE,
-			&value_token
-		);
-
-		if (!present) {
-			ini_parser_expect_error(
-				INI_LEXER_STRING | INI_LEXER_NUMBER |
-				INI_LEXER_DECIMAL | INI_LEXER_BOOLEAN |
-				INI_LEXER_OSQUARE,
+		while (true) {
+			present = ini_parser_expect_tokens(
+				lexer,
+				INI_LEXER_EQUALS | INI_LEXER_NEWLINE,
 				&value_token
 			);
-			return false;
+
+			if (!present) {
+				ini_parser_expect_error(
+					INI_LEXER_EQUALS | INI_LEXER_NEWLINE,
+					&value_token
+				);
+				return false;
+			}
+
+			if (value_token.type == INI_LEXER_NEWLINE) {
+				continue;
+			}
+
+			break;
 		}
 
-		IniField field = {
-			.startl = name_token.row,
-			.endl = value_token.last_row,
-			.dirty = false
-		};
+		while (true) {
+			present = ini_parser_expect_tokens(
+				lexer,
+				INI_LEXER_STRING | INI_LEXER_NUMBER |
+				INI_LEXER_DECIMAL | INI_LEXER_BOOLEAN |
+				INI_LEXER_OSQUARE | INI_LEXER_NEWLINE,
+				&value_token
+			);
 
-		field.fieldname = ini_string_from_sized_string(
+			if (!present) {
+				ini_parser_expect_error(
+					INI_LEXER_STRING | INI_LEXER_NUMBER |
+					INI_LEXER_DECIMAL | INI_LEXER_BOOLEAN |
+					INI_LEXER_OSQUARE | INI_LEXER_NEWLINE,
+					&value_token
+				);
+				return false;
+			}
+
+			if (value_token.type == INI_LEXER_NEWLINE) {
+				continue;
+			}
+
+			break;
+		}
+
+		IniField *field = (IniField*)malloc(sizeof(IniField));
+		field->startl = name_token.row;
+		field->endl = value_token.last_row;
+		field->dirty = false;
+
+		field->fieldname = ini_string_from_sized_string(
 			name_token.data, name_token.len
 		);
 
@@ -615,8 +653,8 @@ static inline bool ini_parse(IniFile *ini, IniLexer *lexer, INI_HANDLER *handler
 		case INI_LEXER_NUMBER:
 		case INI_LEXER_DECIMAL:
 		case INI_LEXER_BOOLEAN:
-			field.type = ini_parser_get_type(value_token.type);
-			ini_parser_get_primitive(value_token, &field.as);
+			field->type = ini_parser_get_type(value_token.type);
+			ini_parser_get_primitive(value_token, &field->as);
 			break;
 
 		case INI_LEXER_OSQUARE:
@@ -646,10 +684,10 @@ static inline bool ini_parse(IniFile *ini, IniLexer *lexer, INI_HANDLER *handler
 				break;
 			}
 
-			field.type = ini_parser_get_type(value_token.type) + (INI_TYPE_STRING_ARR - INI_TYPE_STRING);
-			IniAs_da_init(&field.arr, 2);
-			IniAs_da_append(&field.arr, (IniAs){ 0 });
-			ini_parser_get_primitive(value_token, &(field.arr.items[field.arr.count - 1]));
+			field->type = ini_parser_get_type(value_token.type) + (INI_TYPE_STRING_ARR - INI_TYPE_STRING);
+			IniAs_da_init(&field->arr, 2);
+			IniAs_da_append(&field->arr, (IniAs){ 0 });
+			ini_parser_get_primitive(value_token, &(field->arr.items[field->arr.count - 1]));
 
 			{
 				INI_LEXER_TOKEN exp_token = value_token.type;
@@ -705,27 +743,31 @@ static inline bool ini_parse(IniFile *ini, IniLexer *lexer, INI_HANDLER *handler
 						break;
 					}
 
-					IniAs_da_append(&field.arr, (IniAs){ 0 });
-					ini_parser_get_primitive(value_token, &(field.arr.items[field.arr.count - 1]));
+					IniAs_da_append(&field->arr, (IniAs){ 0 });
+					ini_parser_get_primitive(value_token, &(field->arr.items[field->arr.count - 1]));
 				}
 			}
 
-			field.endl = value_token.last_row;
+			field->endl = value_token.last_row;
 			break;
 		}
 
-		handler(&field);
 		IniField_da_append(&ini->values, field);
+		handler(field, user);
 
 		present = ini_parser_expect_tokens(
 			lexer,
-			INI_LEXER_NEWLINE,
+			INI_LEXER_NEWLINE | INI_LEXER_EOF,
 			&name_token
 		);
 
 		if (!present) {
-			ini_parser_expect_error(INI_LEXER_NEWLINE, &name_token);
+			ini_parser_expect_error(INI_LEXER_NEWLINE | INI_LEXER_EOF, &name_token);
 			return false;
+		}
+
+		if (name_token.type == INI_LEXER_EOF) {
+			break;
 		}
 	}
 
@@ -737,25 +779,26 @@ void ini_free(IniFile *ini) {
 	free(ini->filepath);
 
 	for (size_t i = 0; i < ini->values.count; i++) {
-		switch (ini->values.items[i].type) {
+		switch (ini->values.items[i]->type) {
 		case INI_TYPE_STRING:
-			ini_string_free(ini->values.items[i].as.str);
+			ini_string_free(ini->values.items[i]->as.str);
 			break;
 
 		case INI_TYPE_STRING_ARR:
-			for (size_t j = 0; j < ini->values.items[i].arr.count; j++) {
-				ini_string_free(ini->values.items[i].arr.items[j].str);
+			for (size_t j = 0; j < ini->values.items[i]->arr.count; j++) {
+				ini_string_free(ini->values.items[i]->arr.items[j].str);
 			}
 
 			// Fall through
 		case INI_TYPE_NUMBER_ARR:
 		case INI_TYPE_DECIMAL_ARR:
 		case INI_TYPE_BOOLEAN_ARR:
-			IniAs_da_free(&ini->values.items[i].arr);
+			IniAs_da_free(&ini->values.items[i]->arr);
 			break;
 		}
 
-		ini_string_free(ini->values.items[i].fieldname);
+		ini_string_free(ini->values.items[i]->fieldname);
+		free(ini->values.items[i]);
 	}
 
 	IniField_da_free(&ini->values);
@@ -764,7 +807,8 @@ void ini_free(IniFile *ini) {
 INI_STATUS ini_load(
 	IniFile *ini,
 	const char *filepath,
-	INI_HANDLER *handler
+	INI_HANDLER *handler,
+	void *user
 ) {
 	IniLexer lexer = { 0 };
 
@@ -785,7 +829,7 @@ INI_STATUS ini_load(
 	ini->filepath = (char*)malloc((strlen(filepath) + 1) * sizeof(char));
 	strcpy(ini->filepath, filepath);
 
-	ini_parse(ini, &lexer, handler);
+	ini_parse(ini, &lexer, handler, user);
 
 	free(lexer.data);
 
@@ -835,16 +879,16 @@ static inline size_t ini_write_string(IniAs t, FILE *f) {
 	size_t res = 1;
 	fputc('"', f);
 
-	for (u32 i = 0; i < t.str->size; i++) {
-		if (t.str->value[i] == '\n') {
+	for (u32 i = 0; i < INI_STRING_SIZE(t.str); i++) {
+		if (t.str[i] == '\n') {
 			res++;
-		} else if (t.str->value[i] == '"') {
+		} else if (t.str[i] == '"') {
 			fputc('\\', f);
-		} else if (t.str->value[i] == '\\') {
+		} else if (t.str[i] == '\\') {
 			fputc('\\', f);
 		}
 
-		fputc(t.str->value[i], f);
+		fputc(t.str[i], f);
 	}
 
 	fputc('"', f);
@@ -888,41 +932,43 @@ static inline size_t ini_write_array(IniAs_da arr, FILE *f, size_t (*writer)(Ini
 	return res;
 }
 
-static inline void ini_write_field(IniField *field, FILE *f) {
+static inline size_t ini_write_field(IniField *field, FILE *f) {
 	static_assert(INI_TYPE_AMOUNT == 8, "Incorrect type amount");
 
-	fprintf(f, "%s=", field->fieldname->value);
+	size_t ret;
+	fprintf(f, "%s=", field->fieldname);
 
 	switch (field->type) {
 	case INI_TYPE_STRING:
-		ini_write_string(field->as, f);
+		ret = ini_write_string(field->as, f);
 		break;
 	case INI_TYPE_NUMBER:
-		ini_write_number(field->as, f);
+		ret = ini_write_number(field->as, f);
 		break;
 	case INI_TYPE_DECIMAL:
-		ini_write_decimal(field->as, f);
+		ret = ini_write_decimal(field->as, f);
 		break;
 	case INI_TYPE_BOOLEAN:
-		ini_write_boolean(field->as, f);
+		ret = ini_write_boolean(field->as, f);
 		break;
 	case INI_TYPE_STRING_ARR:
-		ini_write_array(field->arr, f, ini_write_string);
+		ret = ini_write_array(field->arr, f, ini_write_string);
 		break;
 	case INI_TYPE_NUMBER_ARR:
-		ini_write_array(field->arr, f, ini_write_number);
+		ret = ini_write_array(field->arr, f, ini_write_number);
 		break;
 	case INI_TYPE_DECIMAL_ARR:
-		ini_write_array(field->arr, f, ini_write_decimal);
+		ret = ini_write_array(field->arr, f, ini_write_decimal);
 		break;
 	case INI_TYPE_BOOLEAN_ARR:
-		ini_write_array(field->arr, f, ini_write_boolean);
+		ret = ini_write_array(field->arr, f, ini_write_boolean);
 		break;
 	default:
 		assert(0 && "Unreachable");
 	}
 
 	fputc('\n', f);
+	return ret;
 }
 
 INI_STATUS ini_write(IniFile *ini) {
@@ -955,11 +1001,14 @@ INI_STATUS ini_write(IniFile *ini) {
 	ini_write_find_newlines(&newlines, data, len);
 
 	size_t last_line = 0;
+	s64 change = 0;
 
 	for (size_t i = 0; i < ini->values.count; i++) {
-		IniField *field = &ini->values.items[i];
+		IniField *field = ini->values.items[i];
 
 		if (!field->dirty) {
+			field->startl += change;
+			field->endl += change;
 			continue;
 		}
 
@@ -968,12 +1017,22 @@ INI_STATUS ini_write(IniFile *ini) {
 		if (field->startl != last_line) {
 			ini_write_copy(last_line, field->startl - 1, newlines, data, f);
 		}
-		
-		ini_write_field(field, f);
+
 		last_line = field->endl + 1;
+
+		size_t old_size = (field->endl - field->startl + 1);
+		size_t new_size = ini_write_field(field, f);
+
+		field->startl += change;
+		field->endl = field->startl + new_size - 1;
+
+		change += new_size - old_size;
 	}
 
-	ini_write_copy(last_line, newlines.count - 1, newlines, data, f);
+	// If they are the same then all lines were written
+	if (last_line != newlines.count) {
+		ini_write_copy(last_line, newlines.count - 1, newlines, data, f);
+	}
 
 defer:
 	if (f != NULL) {
@@ -991,8 +1050,7 @@ defer:
 	return status;
 }
 
-// BUG: An unclosed string causes the program to go into an infinite loop
-// BUG: `startl` and `endl` are not being update in the `ini_write` function
+// BUG: `startl` and `endl` are not being updated in the `ini_write` function
 // which might cause them to not be correct the second time it is called
 // TODO: Create some utility functions to make it easier to free up values and change them
 // TODO: Add the ability to append a field

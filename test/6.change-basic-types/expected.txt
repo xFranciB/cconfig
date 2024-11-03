@@ -1,0 +1,9 @@
+exit 0
+stdout 0
+stderr 0
+ini 85
+num=50
+dec=69.5
+str="Modified string of different size \"\" ''
+multiline"
+bool=false

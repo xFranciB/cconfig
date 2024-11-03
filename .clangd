@@ -1,4 +1,5 @@
 CompileFlags:
   Add:
+    - "-Iinclude"
     - "-I../include"
     - "-I../../include"

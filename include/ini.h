@@ -38,7 +38,7 @@ typedef union {
 	bool boolean;
 } IniAs;
 
-CREATE_DA(IniAs)
+CREATE_DA(IniAs, IniAs)
 
 typedef struct {
 	IniString *fieldname;
@@ -54,7 +54,7 @@ typedef struct {
 	bool dirty;
 } IniField;
 
-CREATE_DA(IniField)
+CREATE_DA(IniField*, IniField)
 
 typedef struct {
 	char *filepath;
@@ -62,7 +62,8 @@ typedef struct {
 } IniFile;
 
 typedef void (INI_HANDLER)(
-	IniField *field
+	IniField *field,
+	void *user
 );
 
 IniFile ini_init(void);
@@ -71,7 +72,8 @@ void ini_free(IniFile *ini);
 INI_STATUS ini_load(
 	IniFile *ini,
 	const char *filepath,
-	INI_HANDLER *handler
+	INI_HANDLER *handler,
+	void *user
 );
 
 void ini_append_raw(IniFile *ini, const char *str);

@@ -1,0 +1,10 @@
+exit 1
+stdout 0
+stderr 129
+1:13: ERROR: Expected tokens `String`, `Number`, `Decimal`, `Boolean`, `Open square brackets` or `Newline` but got `End Of File`
+ini 17
+unclosed = '
+
+
+
+
