@@ -1,8 +1,8 @@
-#include "util.h"
-#include <ini_string.h>
+#define CCONF_IMPLEMENTATION
+#include "cconfig.h"
 #include <stdio.h>
 #include <ctype.h>
-#include <dirent.h>
+#include <errno.h>
 
 #ifdef _WIN32
 #    include <direct.h>
@@ -14,26 +14,38 @@
 #    include <unistd.h>
 #    include <sys/wait.h>
 #    include <sys/ioctl.h>
+#    include <dirent.h>
 #endif
 
 #define TEST_BASEPATH "./test/"
-#define LIBRARY_ARCHIVE_NAME "ini.a"
-#define LIBRARY_PATH "../"
 
 // Compilation flags
 // NOTE: All paths are relative to the TEST_BASEPATH directory
 #define CC "cc"
-#define CFLAGS "-fsanitize=address -ggdb -Wall -Wextra -pedantic -I../include/ -L" LIBRARY_PATH
-// NOTE: LIBRARY_ARCHIVE NAME has to be added after the sources,
-// so it's not specified here
+#define CFLAGS "-fsanitize=address -ggdb -Wall -Wextra -pedantic -I../"
 
 // Other constants
 #define SUBPROCESS_BUFFER_SIZE 256
 #define COPY_BUFFER 256
 
-CREATE_DA(IniString*, IniString)
+#define ERROR_EXIT() do { \
+	exit(EXIT_FAILURE);   \
+} while (0)
 
-typedef u8 CMD_ID;
+#define ERROR_EXIT_MSG(...) do {  \
+	fprintf(stderr, __VA_ARGS__); \
+	exit(EXIT_FAILURE);           \
+} while (0)
+
+#define ERROR_EXIT_ERRNO(...) do {              \
+	fprintf(stderr, __VA_ARGS__);               \
+	fprintf(stderr, ": %s\n", strerror(errno)); \
+	exit(EXIT_FAILURE);                         \
+} while (0)
+
+_CCONF_CREATE_DA(CConfString*, pCConfString_da)
+
+typedef uint8_t CMD_ID;
 typedef enum {
 	COMMAND_ID_RECORD = 0,
 	COMMAND_ID_TEST,
@@ -44,10 +56,10 @@ typedef enum {
 typedef struct {
 	char *filepath;
 	char *name;
-	u32 number;
+	uint32_t number;
 } Testcase;
 
-CREATE_DA(Testcase, Testcase)
+_CCONF_CREATE_DA(Testcase, Testcase_da)
 
 int testcase_compare(const void *t1, const void *t2) {
 	return ((const Testcase*)t1)->number - ((const Testcase*)t2)->number;
@@ -93,7 +105,7 @@ static inline void copy_file(char *src, char *dst) {
 #ifdef _WIN32
 	assert(0 && "Not implemented");
 #elif defined(unix)
-	u8 buf[COPY_BUFFER];
+	uint8_t buf[COPY_BUFFER];
 	FILE *fin, *fout;
 	size_t bytes_read;
 
@@ -105,8 +117,8 @@ static inline void copy_file(char *src, char *dst) {
 		ERROR_EXIT_ERRNO("ERROR: Error when calling fopen()");
 	}
 
-	while ((bytes_read = fread(buf, sizeof(u8), COPY_BUFFER, fin)) > 0) {
-		fwrite(buf, sizeof(u8), bytes_read, fout);
+	while ((bytes_read = fread(buf, sizeof(uint8_t), COPY_BUFFER, fin)) > 0) {
+		fwrite(buf, sizeof(uint8_t), bytes_read, fout);
 	}
 
 	if (fclose(fin) == EOF) {
@@ -142,20 +154,21 @@ static inline bool files_contents_equal(const char *p1, const char *p2) {
 	}
 
 	while (true) {
-		size_t r1 = fread(copybuf1, sizeof(u8), COPY_BUFFER, f1);
-		size_t r2 = fread(copybuf2, sizeof(u8), COPY_BUFFER, f2);
+		size_t r1 = fread(copybuf1, sizeof(uint8_t), COPY_BUFFER, f1);
+		size_t r2 = fread(copybuf2, sizeof(uint8_t), COPY_BUFFER, f2);
 
 		if (r1 != r2) {
-			RETURN_DEFER(false);
+			_CCONF_RETURN_DEFER(false);
 		}
 
 		if (r1 == 0) {
-			RETURN_DEFER(true);
+			_CCONF_RETURN_DEFER(true);
 		}
 
 		if (memcmp(copybuf1, copybuf2, r1) != 0) {
-			RETURN_DEFER(false);
+			_CCONF_RETURN_DEFER(false);
 		}
+
 	}
 
 defer:
@@ -268,18 +281,18 @@ static inline int run_subprocess(const char *name, const char **argv, size_t arg
 		close(errpipe[0]);
 		close(errpipe[1]);
 
-		IniString_da argvnull;
-		IniString_da_init(&argvnull, argc + 2);
+		pCConfString_da argvnull;
+		pCConfString_da_init(&argvnull, argc + 2);
 
-		IniString *arg = ini_string_new(name);
-		IniString_da_append(&argvnull, arg);
+		CConfString *arg = cconf_string_new(name);
+		pCConfString_da_append(&argvnull, arg);
 
 		for (size_t i = 0; i < argc; i++) {
-			arg = ini_string_new(argv[i]);
-			IniString_da_append(&argvnull, arg);
+			arg = cconf_string_new(argv[i]);
+			pCConfString_da_append(&argvnull, arg);
 		}
 
-		IniString_da_append(&argvnull, NULL);
+		pCConfString_da_append(&argvnull, NULL);
 
 		if (execvp(
 			name, argvnull.items
@@ -311,7 +324,7 @@ static inline int run_subprocess(const char *name, const char **argv, size_t arg
 }
 
 static inline void compile_testcase(Testcase tc) {
-	static IniString_da command = { 0 };
+	static pCConfString_da command = { 0 };
 	static size_t base_count = 0;
 
 	// First time running this function, create
@@ -319,14 +332,14 @@ static inline void compile_testcase(Testcase tc) {
 	if (command.capacity == 0) {
 		char *p = CFLAGS;
 		char *start = p;
-		IniString *str;
+		CConfString *str;
 
-		IniString_da_init(&command, 4);
+		pCConfString_da_init(&command, 4);
 
 		while (*p) {
 			if (*p == ' ') {
-				str = ini_string_from_sized_string(start, p - start);
-				IniString_da_append(&command, str);
+				str = cconf_string_from_sized_string(start, p - start);
+				pCConfString_da_append(&command, str);
 
 				start = p + 1;
 			}
@@ -335,8 +348,8 @@ static inline void compile_testcase(Testcase tc) {
 		}
 
 		if (start != p) {
-			str = ini_string_from_sized_string(start, p - start);
-			IniString_da_append(&command, str);
+			str = cconf_string_from_sized_string(start, p - start);
+			pCConfString_da_append(&command, str);
 		}
 		
 		base_count = command.count;
@@ -351,15 +364,14 @@ static inline void compile_testcase(Testcase tc) {
 	end = mystrcat(end, "/");
 	mystrcat(end, "main.c");
 
-	IniString *inp = ini_string_new(buf);
+	CConfString *inp = cconf_string_new(buf);
 
-	IniString_da_append(&command, inp);
-	IniString_da_append(&command, "-o");
+	pCConfString_da_append(&command, inp);
+	pCConfString_da_append(&command, "-o");
 
 	*end = 0;
 	mystrcat(end, "main");
-	IniString_da_append(&command, buf);
-	IniString_da_append(&command, "-l:" LIBRARY_ARCHIVE_NAME);
+	pCConfString_da_append(&command, buf);
 
 	void *out;
 	int status_code = run_subprocess(
@@ -388,7 +400,7 @@ static inline void compile_testcase(Testcase tc) {
 	}
 
 	free_subprocess(&out);
-	ini_string_free(inp);
+	cconf_string_free(inp);
 
 	command.count = base_count;
 }
@@ -400,8 +412,8 @@ static inline bool run_testcase(Testcase tc, CMD_ID command_id) {
 	char buf[256];
 	char *end;
 	void *out;
-	IniString *outini;
-	IniString_da argv;
+	CConfString *outini;
+	pCConfString_da argv;
 	FILE *fout;
 
 	buf[0] = 0;
@@ -410,7 +422,7 @@ static inline bool run_testcase(Testcase tc, CMD_ID command_id) {
 	end = mystrcat(buf, tc.filepath);
 	end = mystrcat(end, "/");
 	mystrcat(end, "run.ini");
-	outini = ini_string_new(buf);
+	outini = cconf_string_new(buf);
 
 	// Put test.ini in `buf`
 	*end = 0;
@@ -424,8 +436,8 @@ static inline bool run_testcase(Testcase tc, CMD_ID command_id) {
 	mystrcat(end, "main");
 
 	// Create argv array from `outini`
-	IniString_da_init(&argv, 1);
-	IniString_da_append(&argv, outini);
+	pCConfString_da_init(&argv, 1);
+	pCConfString_da_append(&argv, outini);
 
 	int status_code = run_subprocess(buf, (const char**)argv.items, argv.count, &out);
 
@@ -473,8 +485,8 @@ static inline bool run_testcase(Testcase tc, CMD_ID command_id) {
 
 		fprintf(fout, "ini %ld\n", len);
 
-		while ((bytes_read = fread(copybuf, sizeof(u8), COPY_BUFFER, runini)) > 0) {
-			fwrite(copybuf, sizeof(u8), bytes_read, fout);
+		while ((bytes_read = fread(copybuf, sizeof(uint8_t), COPY_BUFFER, runini)) > 0) {
+			fwrite(copybuf, sizeof(uint8_t), bytes_read, fout);
 		}
 
 		if (fclose(runini) == EOF) {
@@ -493,15 +505,15 @@ static inline bool run_testcase(Testcase tc, CMD_ID command_id) {
 
 	} else if (command_id == COMMAND_ID_TEST) {
 		// Put actual.txt in `outini`
-		ini_string_free(outini);
-		outini = ini_string_new(buf);
+		cconf_string_free(outini);
+		outini = cconf_string_new(buf);
 
 		// Put expected.txt in `buf`
 		*end = 0;
 		mystrcat(end, "expected.txt");
 
 		if (!files_contents_equal(buf, outini)) {
-			RETURN_DEFER(false);
+			_CCONF_RETURN_DEFER(false);
 		}
 
 		delete_file(outini);
@@ -510,15 +522,15 @@ static inline bool run_testcase(Testcase tc, CMD_ID command_id) {
 	status = true;
 defer:
 	free_subprocess(&out);
-	ini_string_free(outini);
-	IniString_da_free(&argv);
+	cconf_string_free(outini);
+	pCConfString_da_free(&argv);
 	return status;
 }
 
 static inline void validate_testcase(Testcase tc, CMD_ID command_id) {
 	static_assert(COMMAND_ID_AMOUNT == 2, "Incorrect command id amount");
 	char buf[256];
-	u8 found_magic = 0;
+	uint8_t found_magic = 0;
 
 	buf[0] = 0;
 
@@ -686,13 +698,6 @@ int main(int argc, const char **argv) {
 
 	if (chdir(TEST_BASEPATH) == -1) {
 		ERROR_EXIT_ERRNO("ERROR: Error when calling chdir()");
-	}
-
-	if (!file_exists(LIBRARY_PATH LIBRARY_ARCHIVE_NAME)) {
-		ERROR_EXIT_MSG(
-			"ERROR: Cannot find library file\n"
-			"       Did you forget to build? If so, run `make`"
-		);
 	}
 
 	Testcase_da tcs = get_testcases(command_id);

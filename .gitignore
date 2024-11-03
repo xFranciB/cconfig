@@ -1,4 +1,2 @@
-build/
-ini.a
 testini
 test/*/main
