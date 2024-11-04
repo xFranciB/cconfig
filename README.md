@@ -101,8 +101,8 @@ typedef struct {
 		CConfAs_da arr;
 	};
 
-	size_t startl;
-	size_t endl;
+	int64_t startl;
+	int64_t endl;
 	uint8_t type; // enum CCONF_TYPE
 	bool dirty;
 } CConfField;
@@ -206,8 +206,12 @@ typedef void (CCONF_HANDLER)(
 ```
 The function passed into the `handler` parameter will be called on each new field parsed. The `user` parameter of the `cconf_load` function is passed directly to `handler` without modifying it.
 
+**`CCONFDEF CConfField *cconf_field_new(CConfString *fieldname, uint8_t type)`**<br>
+Creates a new `CConfField`, to be used with the `cconf_append_field` function.
+
 **`CCONFDEF void cconf_append_field(CConfFile* cconf, CConfField* field)`**<br>
-TODO: Not implemented
+Appends a field to `CConfFile` and sets it as `dirty`.
+The `CConfField` should be allocated using the `cconf_field_new` function.
 
 **`CCONFDEF CCONF_STATUS cconf_write(CConfFile* cconf)`**<br>
 Writes any pending changes to any field to the configuration file.
@@ -219,6 +223,7 @@ To compile the testing framework, just run:
 ```bash
 $ gcc -o runtest test.c
 ```
+Note that the library itself is `C99` compliant, but the testing framework is not!
 Then, to run it:
 ```bash
 $ ./runtest RECORD   # To record updated tests

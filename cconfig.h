@@ -110,8 +110,8 @@ typedef struct {
 		CConfAs_da arr;
 	};
 
-	size_t startl;
-	size_t endl;
+	int64_t startl;
+	int64_t endl;
 	uint8_t type; // enum CCONF_TYPE
 	bool dirty;
 } CConfField;
@@ -183,6 +183,7 @@ CCONFDEF CCONF_STATUS cconf_load(
 	void* user
 );
 
+CCONFDEF CConfField *cconf_field_new(CConfString *fieldname, uint8_t type);
 CCONFDEF void cconf_append_field(CConfFile* cconf, CConfField* field);
 CCONFDEF CCONF_STATUS cconf_write(CConfFile* cconf);
 
@@ -992,7 +993,7 @@ static inline size_t _cconf_write_string(CConfAs t, FILE* f) {
 	size_t res = 1;
 	fputc('"', f);
 
-	for (uint32_t i = 0; i < CCONF_STRING_SIZE(t.str); i++) {
+	for (CConfStringSize i = 0; i < CCONF_STRING_SIZE(t.str); i++) {
 		if (t.str[i] == '\n') {
 			res++;
 		}
@@ -1194,14 +1195,21 @@ CCONFDEF CCONF_STATUS cconf_load(
 	return CCONF_STATUS_OK;
 }
 
-// void cconf_append_field(CConfFile *cconf, CConfField *field) {
-	// field->dirty = true;
-	// field->_fline = cconf->values.items[cconf->values.count - 1]._lline + 1;
-	// field->_lline = 
-	// pCConfField_da_append(&cconf->values, *field);
-// }
+CCONFDEF CConfField *cconf_field_new(CConfString *fieldname, uint8_t type) {
+	CConfField *field = (CConfField*)malloc(sizeof(CConfField));
+	field->fieldname = fieldname;
+	field->type = type;
+	return field;
+}
 
-CCONF_STATUS cconf_write(CConfFile* cconf) {
+CCONFDEF void cconf_append_field(CConfFile *cconf, CConfField *field) {
+	field->dirty = true;
+	field->startl = -1;
+	field->endl = -1;
+	pCConfField_da_append(&cconf->values, field);
+}
+
+CCONFDEF CCONF_STATUS cconf_write(CConfFile* cconf) {
 	CCONF_STATUS status = CCONF_STATUS_OK;
 	size_t len;
 	char* data = NULL;
@@ -1233,8 +1241,9 @@ CCONF_STATUS cconf_write(CConfFile* cconf) {
 	{	
 		size_t last_line = 0;
 		int64_t change = 0;
+		size_t i;
 		
-		for (size_t i = 0; i < cconf->values.count; i++) {
+		for (i = 0; i < cconf->values.count; i++) {
 			CConfField* field = cconf->values.items[i];
 
 			if (!field->dirty) {
@@ -1245,24 +1254,42 @@ CCONF_STATUS cconf_write(CConfFile* cconf) {
 
 			field->dirty = false;
 
-			if (field->startl != last_line) {
+			if (field->startl < 0) {
+				break;
+			}
+
+			if ((uint64_t) field->startl != last_line) {
 				_cconf_write_copy(last_line, field->startl - 1, newlines, data, f);
 			}
 
+			size_t new_size = _cconf_write_field(field, f);
+			size_t old_size = (field->endl - field->startl + 1);
+
 			last_line = field->endl + 1;
 
-			size_t old_size = (field->endl - field->startl + 1);
-			size_t new_size = _cconf_write_field(field, f);
-
 			field->startl += change;
-			field->endl = field->startl + new_size - 1;
-
 			change += new_size - old_size;
+
+			field->endl = field->startl + new_size - 1;
 		}
 
 		// If they are the same then all lines were written
 		if (last_line != newlines.count) {
 			_cconf_write_copy(last_line, newlines.count - 1, newlines, data, f);
+		}
+
+		if (i != cconf->values.count) {
+			last_line = newlines.count;
+			fputc('\n', f);
+
+			for (; i < cconf->values.count; i++) {
+				CConfField* field = cconf->values.items[i];
+				size_t new_size = _cconf_write_field(field, f);
+
+				field->dirty = false;
+				field->startl = last_line + 1;
+				field->endl = field->startl + new_size - 1;
+			}
 		}
 	}
 
@@ -1282,8 +1309,7 @@ defer:
 	return status;
 }
 
-// TODO: Create some utility functions to make it easier to free up values and change them
-// TODO: Add the ability to append a field
+// TODO: Add the ability to delete a field
 
 #endif // CCONF_IMPLEMENTATION
 #endif // CCONF_H

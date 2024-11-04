@@ -1,0 +1,17 @@
+exit 0
+stdout 0
+stderr 0
+ini 213
+
+# comment1
+str = "test" #comment2
+#comment 3
+
+new_field1="New string
+also multiline"
+new_field2=-5.5
+new_field3="Another string"
+new_field4=20
+new_field5=false
+new_array=["String1","String2
+Multiline","String3"]
