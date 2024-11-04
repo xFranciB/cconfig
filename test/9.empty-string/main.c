@@ -4,9 +4,14 @@
 #include <assert.h>
 
 void handler(CConfField *field, void *user) {
-	assert(strcmp(field->fieldname, "str") == 0);
-	assert(field->type == CCONF_TYPE_STRING);
-	assert(strcmp(field->as.str, "  \n\n'") == 0);
+    assert(
+        strcmp(field->fieldname, "empty") == 0 ||
+        strcmp(field->fieldname, "empty_at_eof") == 0
+    );
+
+    assert(field->type == CCONF_TYPE_STRING);
+    assert(CCONF_STRING_SIZE(field->as.str) == 0);
+    assert(strcmp(field->as.str, "") == 0);
 }
 
 int main(int argc, const char *argv[]) {

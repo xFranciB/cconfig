@@ -1,7 +1,7 @@
 // Before including this file, add the following line to
 // include implementations as well:
 //
-//   #define CCONF_IMPLEMENTATION
+//     #define CCONF_IMPLEMENTATION
 //
 // For more details on stb-style libraries:
 // https://github.com/nothings/stb
@@ -11,15 +11,12 @@
 
 #include <stdlib.h>
 #include <stdint.h>
+#include <inttypes.h>
 #include <stdbool.h>
 #include <assert.h>
 #include <string.h>
 #include <stdio.h>
 #include <ctype.h>
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 #ifndef CCONFDEF
 #define CCONFDEF static inline
@@ -170,9 +167,9 @@ typedef struct {
 } _CConfToken;
 
 // String functions
-CCONFDEF CConfString* cconf_string_from_size(size_t len);
+CCONFDEF CConfString* cconf_string_from_size(CConfStringSize len);
 CCONFDEF CConfString* cconf_string_new(const char* s);
-CCONFDEF CConfString* cconf_string_from_sized_string(const char* s, size_t len);
+CCONFDEF CConfString* cconf_string_from_sized_string(const char* s, CConfStringSize len);
 CCONFDEF void cconf_string_free(CConfString* s);
 
 // CConf main functions
@@ -186,11 +183,9 @@ CCONFDEF CCONF_STATUS cconf_load(
 	void* user
 );
 
-CCONFDEF void cconf_append_raw(CConfFile* cconf, const char* str);
 CCONFDEF void cconf_append_field(CConfFile* cconf, CConfField* field);
 CCONFDEF CCONF_STATUS cconf_write(CConfFile* cconf);
 
-#define CCONF_IMPLEMENTATION // TODO: Remove
 #ifdef CCONF_IMPLEMENTATION
 
 static inline uint8_t _cconf_popcnt(uint16_t tokens) {
@@ -210,7 +205,7 @@ static inline void _cconf_token_format_line(_CConfToken* token, char* buf) {
 }
 
 static inline void _cconf_token_format_name(_CCONF_LEXER_TOKEN token, char* buf) {
-	static_assert(_CCONF_LEXER_TOKEN_AMOUNT == 12, "Incorrect token amount");
+	_Static_assert(_CCONF_LEXER_TOKEN_AMOUNT == 12, "Incorrect token amount");
 	strcat(buf, "`");
 
 	switch (token) {
@@ -462,7 +457,6 @@ static inline _CConfToken _cconf_lexer_read_string(_CConfLexer* lexer, char d) {
 	char current = lexer->data[lexer->pos];
 	size_t len = 0;
 
-	// TODO: Test what happens with an empty string
 	while (current != d) {
 		if (_cconf_lexer_next(lexer, &current) == false) {
 			_CConfToken ret = _CCONF_TOKEN(sr, lexer->row, sc, sp, len, EOF);
@@ -483,7 +477,10 @@ static inline _CConfToken _cconf_lexer_read_string(_CConfLexer* lexer, char d) {
 		}
 	}
 
-	len--; // To remove the trailing quote
+	if (len != 0) {
+		len--; // To remove the trailing quote
+		       // Unless the string length is 0
+	}
 	_CConfToken ret = _CCONF_TOKEN(sr, lexer->row, sc, sp, len, STRING);
 	return ret;
 }
@@ -1014,7 +1011,7 @@ static inline size_t _cconf_write_string(CConfAs t, FILE* f) {
 }
 
 static inline size_t _cconf_write_number(CConfAs t, FILE* f) {
-	fprintf(f, "%lld", t.num);
+	fprintf(f, "%" PRId64, t.num);
 	return 1;
 }
 
@@ -1052,7 +1049,7 @@ static inline size_t _cconf_write_array(CConfAs_da arr, FILE* f, size_t(*writer)
 }
 
 static inline size_t _cconf_write_field(CConfField* field, FILE* f) {
-	static_assert(CCONF_TYPE_AMOUNT == 8, "Incorrect type amount");
+	_Static_assert(CCONF_TYPE_AMOUNT == 8, "Incorrect type amount");
 
 	size_t ret;
 	fprintf(f, "%s=", field->fieldname);
@@ -1094,7 +1091,7 @@ static inline size_t _cconf_write_field(CConfField* field, FILE* f) {
  
 // String functions
 
-CCONFDEF CConfString* cconf_string_from_size(size_t len) {
+CCONFDEF CConfString* cconf_string_from_size(CConfStringSize len) {
 	CConfString* res = (CConfString*)malloc(
 		(sizeof(CConfStringSize)) +
 		len + 1
@@ -1116,7 +1113,7 @@ CCONFDEF CConfString* cconf_string_new(const char* s) {
 	return res;
 }
 
-CCONFDEF CConfString* cconf_string_from_sized_string(const char* s, size_t len) {
+CCONFDEF CConfString* cconf_string_from_sized_string(const char* s, CConfStringSize len) {
 	CConfString* res = cconf_string_from_size(len);
 	memcpy(res, s, len);
 	res[CCONF_STRING_SIZE(res)] = 0;
@@ -1135,7 +1132,7 @@ CCONFDEF CConfFile cconf_init(void) {
 }
 
 CCONFDEF void cconf_free(CConfFile* cconf) {
-	static_assert(CCONF_TYPE_AMOUNT == 8, "Incorrect type amount");
+	_Static_assert(CCONF_TYPE_AMOUNT == 8, "Incorrect type amount");
 	free(cconf->filepath);
 
 	for (size_t i = 0; i < cconf->values.count; i++) {
@@ -1197,10 +1194,6 @@ CCONFDEF CCONF_STATUS cconf_load(
 	return CCONF_STATUS_OK;
 }
 
-// void cconf_append_raw(CConfFile *cconf, const char *str) {
-//
-// }
-
 // void cconf_append_field(CConfFile *cconf, CConfField *field) {
 	// field->dirty = true;
 	// field->_fline = cconf->values.items[cconf->values.count - 1]._lline + 1;
@@ -1237,38 +1230,40 @@ CCONF_STATUS cconf_write(CConfFile* cconf) {
 	_CConf_size_t_da_init(&newlines, 2);
 	_cconf_write_find_newlines(&newlines, data, len);
 
-	size_t last_line = 0;
-	int64_t change = 0;
+	{	
+		size_t last_line = 0;
+		int64_t change = 0;
+		
+		for (size_t i = 0; i < cconf->values.count; i++) {
+			CConfField* field = cconf->values.items[i];
 
-	for (size_t i = 0; i < cconf->values.count; i++) {
-		CConfField* field = cconf->values.items[i];
+			if (!field->dirty) {
+				field->startl += change;
+				field->endl += change;
+				continue;
+			}
 
-		if (!field->dirty) {
+			field->dirty = false;
+
+			if (field->startl != last_line) {
+				_cconf_write_copy(last_line, field->startl - 1, newlines, data, f);
+			}
+
+			last_line = field->endl + 1;
+
+			size_t old_size = (field->endl - field->startl + 1);
+			size_t new_size = _cconf_write_field(field, f);
+
 			field->startl += change;
-			field->endl += change;
-			continue;
+			field->endl = field->startl + new_size - 1;
+
+			change += new_size - old_size;
 		}
 
-		field->dirty = false;
-
-		if (field->startl != last_line) {
-			_cconf_write_copy(last_line, field->startl - 1, newlines, data, f);
+		// If they are the same then all lines were written
+		if (last_line != newlines.count) {
+			_cconf_write_copy(last_line, newlines.count - 1, newlines, data, f);
 		}
-
-		last_line = field->endl + 1;
-
-		size_t old_size = (field->endl - field->startl + 1);
-		size_t new_size = _cconf_write_field(field, f);
-
-		field->startl += change;
-		field->endl = field->startl + new_size - 1;
-
-		change += new_size - old_size;
-	}
-
-	// If they are the same then all lines were written
-	if (last_line != newlines.count) {
-		_cconf_write_copy(last_line, newlines.count - 1, newlines, data, f);
 	}
 
 defer:
@@ -1291,9 +1286,4 @@ defer:
 // TODO: Add the ability to append a field
 
 #endif // CCONF_IMPLEMENTATION
-
-#ifdef __cplusplus
-}
-#endif
-
 #endif // CCONF_H

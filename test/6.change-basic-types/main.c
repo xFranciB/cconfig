@@ -1,3 +1,4 @@
+#define CCONF_IMPLEMENTATION
 #include "cconfig.h"
 #include <locale.h>
 #include <assert.h>

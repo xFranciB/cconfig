@@ -22,7 +22,7 @@
 // Compilation flags
 // NOTE: All paths are relative to the TEST_BASEPATH directory
 #define CC "cc"
-#define CFLAGS "-fsanitize=address -ggdb -Wall -Wextra -pedantic -I../"
+#define CFLAGS "-std=c99 -fsanitize=address -ggdb -Wall -Wextra -pedantic -I../"
 
 // Other constants
 #define SUBPROCESS_BUFFER_SIZE 256
