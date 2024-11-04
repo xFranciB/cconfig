@@ -60,9 +60,8 @@ Here is a list of all defined values, these *should not* be modified unless expl
 #### Dynamic arrays
 CConfig ships with a few dynamic array types, such as `pCConfField_da` or `CConfAs_da`. All of these types are suffixed with a `_da`, and they all follow the same structure:
 ```c
-// With `name` we indicate the name of the type,
-// like `CConfAs_da`, with `T` we indicate the
-// type of the values inside the array, like `CConfAs`
+// With `Name` we indicate the name of the type, like `CConfAs_da`.
+// With `T` we indicate the type of the values inside the array, like `CConfAs`
 typedef struct {
 	T *items;
 	size_t count;
@@ -164,39 +163,39 @@ It is used by the `CConfField` struct, and it represents one of the four basic (
 
 ### API
 #### Dynamic arrays
-**`..._da_init(Name *arr, size_t initial_size)`**
+**`..._da_init(Name *arr, size_t initial_size)`**<br>
 Initializes a dynamic array with a given initial size.
 
-**`..._da_append(Name *arr, T value)`**
+**`..._da_append(Name *arr, T value)`**<br>
 Appends a value into the array
 
-**`..._da_free*(Name *arr)`**
+**`..._da_free(Name *arr)`**<br>
 Frees a dynamic array.
 Note that this does not call `free` on any of the items inside the array.
 
 #### CConfString
-**`CCONFDEF CConfString* cconf_string_from_size(CConfStringSize len)`**
+**`CCONFDEF CConfString* cconf_string_from_size(CConfStringSize len)`**<br>
 Constructs a new `CConfString` from a given size.
 The `CConfString` is allocated and its size is set in memory. No further operations are carried out, which means that the resulting buffer is uninitialized.
 
-**`CCONFDEF CConfString* cconf_string_new(const char* s)`**
+**`CCONFDEF CConfString* cconf_string_new(const char* s)`**<br>
 Constructs a new `CConfString` from a NULL-terminated C-string.
 Returns a pointer to the heap-allocated `CConfString`.
 
-**`CCONFDEF CConfString* cconf_string_from_sized_string(const char* s, CConfStringSize len)`**
+**`CCONFDEF CConfString* cconf_string_from_sized_string(const char* s, CConfStringSize len)`**<br>
 Constructs a new `CConfString` from a sized string, i.e. one that does not necessarly have a NULL-terminator, but whose size is known.
 
-**`CCONFDEF void cconf_string_free(CConfString* s)`**
+**`CCONFDEF void cconf_string_free(CConfString* s)`**<br>
 Frees a `CConfString`.
 
 #### CConfig
-**`CCONFDEF CConfFile cconf_init(void)`**
+**`CCONFDEF CConfFile cconf_init(void)`**<br>
 Instantiates a `CConfFile`.
 
-**`CCONFDEF void cconf_free(CConfFile* cconf)`**
-Frees a `CConfFile`
+**`CCONFDEF void cconf_free(CConfFile* cconf)`**<br>
+Frees a `CConfFile` along with all of its fields and dynamic arrays.
 
-**`CCONFDEF CCONF_STATUS cconf_load(CConfFile* cconf, const char* filepath, CCONF_HANDLER* handler, void* user)`**
+**`CCONFDEF CCONF_STATUS cconf_load(CConfFile* cconf, const char* filepath, CCONF_HANDLER* handler, void* user)`**<br>
 Loads a configuration file into a `CConfFile`.
 `CCONF_HANDLER` is a function pointer defined as follows:
 ```c
@@ -207,10 +206,10 @@ typedef void (CCONF_HANDLER)(
 ```
 The function passed into the `handler` parameter will be called on each new field parsed. The `user` parameter of the `cconf_load` function is passed directly to `handler` without modifying it.
 
-**`CCONFDEF void cconf_append_field(CConfFile* cconf, CConfField* field)`**
+**`CCONFDEF void cconf_append_field(CConfFile* cconf, CConfField* field)`**<br>
 TODO: Not implemented
 
-**`CCONFDEF CCONF_STATUS cconf_write(CConfFile* cconf)`**
+**`CCONFDEF CCONF_STATUS cconf_write(CConfFile* cconf)`**<br>
 Writes any pending changes to any field to the configuration file.
 This functions checks all `CConfField`'s inside `CConfFile`, and writes all the ones with `dirty` set to `true` to the configuration file, while also setting `dirty` to `false`.
 
