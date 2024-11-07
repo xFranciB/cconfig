@@ -1280,7 +1280,10 @@ CCONFDEF CCONF_STATUS cconf_write(CConfFile* cconf) {
 
 		if (i != cconf->values.count) {
 			last_line = newlines.count;
-			fputc('\n', f);
+
+			if (i != 0) {	
+				fputc('\n', f);
+			}
 
 			for (; i < cconf->values.count; i++) {
 				CConfField* field = cconf->values.items[i];
